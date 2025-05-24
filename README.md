@@ -14,18 +14,25 @@ This mod provides immersive, teacher-friendly teleportation features. It allows 
 - Return teleport to bring players back to their original location
 - Wooden signpost or banner marker nodes to visually represent destinations
 - Optional rule enforcement per location (PvP, unbreakable zones)
-- Integration with Unified Inventory’s waypoint system (5 per player)
-- Optional dependencies: `areas`, `protector`, `travelnet`, `whitelist`
 - Minimap HUD waypoints to guide navigation
 - No overlap with travelnet or sethome mods
+
+## Dependencies
+- [Unified Inventory](https://content.luanti.org/packages/RealBadAngel/unified_inventory/): Integration with Unified Inventory’s waypoint system (5 per player)
+
+## Optional dependencies
+- [Areas](https://content.luanti.org/packages/ShadowNinja/areas/)
+- [Protector Redo](https://content.luanti.org/packages/TenPlus1/protector/)
+- [Travelnet Redo](https://content.luanti.org/packages/Emojiminetest/travelnet_redo/)
+- [Whitelist](https://content.luanti.org/packages/Zughy/whitelist/)
 
 ## Commands
 
 ```
-/setloc <name>                   - Set a teleport location at current position
-/tploc <targets> <name>         - Teleport players (me, all, or list) to a location
-/delloc <name>                  - Delete a saved location
-/listloc                        - List available teleport locations
+/setloc <name>                 - Set a teleport location at current position
+/tploc <targets> <name>        - Teleport players (me, all, or list) to a location
+/delloc <name>                 - Delete a saved location
+/listloc                       - List available teleport locations
 /tprestore <targets>           - Return players to their previous position
 /schedule_teleport <group> <location> <HH:MM> - Schedule group teleport
 ```
