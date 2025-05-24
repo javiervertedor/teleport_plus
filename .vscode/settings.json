@@ -1,0 +1,13 @@
+{
+  "emeraldwalk.runonsave": {
+    "commands": [
+      {
+        "match": ".*\\.(lua|png|conf)$",
+        "cmd": "robocopy \"${workspaceFolder}\" \"C:\\Users\\Vertedor.Francisco\\Documents\\luanti-5.11.0-win64\\mods\\teleport_plus\" /MIR /XD .vscode .git /NFL /NDL",
+        "message": "Copying mod with robocopy...",
+        "messageAfter": "Mod copied successfully."
+      }
+    ],
+    "autoClearConsole": true
+  }
+}
