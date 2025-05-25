@@ -30,7 +30,7 @@ This mod provides immersive, teacher-friendly teleportation features. It allows 
 
 ```
 /setloc <name>                - Set a teleport location at current position
-/tploc <targets> <name>       - Teleport players (me, all, or list) to a location
+/tp <targets> <name>       - Teleport players (me, all, or list) to a location
 /delloc <name>                - Delete a saved location
 /listloc                      - List available teleport locations
 /tprestore <targets>          - Return players to their previous position
