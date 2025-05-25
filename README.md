@@ -36,7 +36,7 @@ This mod provides immersive, teacher-friendly teleportation features. It allows 
 | `/listloc`                                     | List available teleport locations                |
 | `/tprestore <targets>`                         | Return players to their previous position        |
 | `/setgroup <group> user1, user2, ...`          | Set a group of users                             |
-| `/schedule_teleport <targets> <location> <HH:MM>` | Schedule users or group teleport              |
+| `/schedule_teleport <targets> <location> <day1,day2> <HH:MM>` | Schedule users or group teleport              |
 
 Note: `<targets>` can be `me`, `all`, groups `Team1` or `name1,name2`
 
