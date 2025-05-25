@@ -23,20 +23,21 @@ This mod provides immersive, teacher-friendly teleportation features. It allows 
 ## Optional dependencies
 - [Areas](https://content.luanti.org/packages/ShadowNinja/areas/)
 - [Protector Redo](https://content.luanti.org/packages/TenPlus1/protector/)
-- [Travelnet Redo](https://content.luanti.org/packages/Emojiminetest/travelnet_redo/)
-- [Whitelist](https://content.luanti.org/packages/Zughy/whitelist/)
+- [Travelnet](https://content.luanti.org/packages/mt-mods/travelnet/)
+- [Whiter List](https://content.luanti.org/packages/AntumDeluge/whitelist/)
 
 ## Commands
 
 ```
-/setloc <name>                 - Set a teleport location at current position
-/tploc <targets> <name>        - Teleport players (me, all, or list) to a location
-/delloc <name>                 - Delete a saved location
-/listloc                       - List available teleport locations
-/tprestore <targets>           - Return players to their previous position
-/schedule_teleport <group> <location> <HH:MM> - Schedule group teleport
+/setloc <name>                - Set a teleport location at current position
+/tploc <targets> <name>       - Teleport players (me, all, or list) to a location
+/delloc <name>                - Delete a saved location
+/listloc                      - List available teleport locations
+/tprestore <targets>          - Return players to their previous position
+/setgroup <group> user1, user2, ...       - Set a group of users
+/schedule_teleport <targets> <location> <HH:MM> - Schedule users or group teleport
 ```
-Note: `<targets>` can be `me`, `all`, or `name1,name2`
+Note: `<targets>` can be `me`, `all`, groups `Team1` or `name1,name2`
 
 ## Marker Nodes
 
