@@ -30,7 +30,7 @@ This mod provides immersive, teacher-friendly teleportation features. It allows 
 
 | Command                                        | Description                                      |
 |-----------------------------------------------|--------------------------------------------------|
-| `/setloc <name> [pvp=on\|off] [diggable=on\|off]` | Set a teleport location at current position     |
+| `/setloc <name> [pvp=on\|off] [editable=on\|off]` | Set a teleport location at current position     |
 | `/tp <targets> <name>`                         | Teleport players (me, all, or list) to a location |
 | `/delloc <name>`                               | Delete a saved location                          |
 | `/listloc`                                     | List available teleport locations                |
