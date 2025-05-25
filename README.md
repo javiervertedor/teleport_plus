@@ -28,15 +28,16 @@ This mod provides immersive, teacher-friendly teleportation features. It allows 
 
 ## Commands
 
-```
-/setloc <name>                - Set a teleport location at current position
-/tp <targets> <name>       - Teleport players (me, all, or list) to a location
-/delloc <name>                - Delete a saved location
-/listloc                      - List available teleport locations
-/tprestore <targets>          - Return players to their previous position
-/setgroup <group> user1, user2, ...       - Set a group of users
-/schedule_teleport <targets> <location> <HH:MM> - Schedule users or group teleport
-```
+| Command                                        | Description                                      |
+|-----------------------------------------------|--------------------------------------------------|
+| `/setloc <name> [pvp=on\|off] [diggable=on\|off]` | Set a teleport location at current position     |
+| `/tp <targets> <name>`                         | Teleport players (me, all, or list) to a location |
+| `/delloc <name>`                               | Delete a saved location                          |
+| `/listloc`                                     | List available teleport locations                |
+| `/tprestore <targets>`                         | Return players to their previous position        |
+| `/setgroup <group> user1, user2, ...`          | Set a group of users                             |
+| `/schedule_teleport <targets> <location> <HH:MM>` | Schedule users or group teleport              |
+
 Note: `<targets>` can be `me`, `all`, groups `Team1` or `name1,name2`
 
 ## Marker Nodes
