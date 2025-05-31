@@ -10,6 +10,7 @@ This mod provides immersive, teacher-friendly teleportation features. It allows 
 
 - Named teleport locations (e.g. school, farm, lab)
 - Group teleportation with support for `me`, `all`, and player lists
+- Group management system with item distribution and messaging
 - Scheduled teleports for automatic class movement
 - Return teleport to bring players back to their original location
 - Wooden signpost or banner marker nodes to visually represent destinations
@@ -35,7 +36,13 @@ This mod provides immersive, teacher-friendly teleportation features. It allows 
 | `/delloc <name>`                               | Delete a saved location                          |
 | `/listloc`                                     | List available teleport locations                |
 | `/tprestore <targets>`                         | Return players to their previous position        |
-| `/setgroup <group> user1, user2, ...`          | Set a group of users                             |
+| `/setgroup <group> user1, user2, ...`          | Set a group of users                            |
+| `/groupadd <group> user1, user2, ...`          | Adds users to a specific group                  |
+| `/groupremove <group> user1, user2, ...`       | Removes users from a specific group             |
+| `/deletegroup <group>`                         | Deletes a group of users                        |
+| `/group <group>`                               | Lists users in a group                          |
+| `/givegroup <group> <item> [quantity]`         | Give items to all online users in a group (max 99) |
+| `/groupmsg <group> <message>`                  | Send a private message to all online users in a group |
 | `/schedule_teleport <targets> <location> <day1,day2> <HH:MM>` | Schedule users or group teleport              |
 
 Note: `<targets>` can be `me`, `all`, groups `Team1` or `name1,name2`
