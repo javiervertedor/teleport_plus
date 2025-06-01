@@ -731,3 +731,10 @@ minetest.register_chatcommand("delloc", {
         return true, "Deleted location '"..loc_name.."'"
     end
 })
+
+-- command /tp <targets> <location>
+-- save their original location and a flag that they have been tp 
+-- teleport all the online (and optional whitelisted) users
+-- ignore invalid users (and show a message)
+-- check that the destination location exists and it's safe
+-- do a similar task with /tprestore: check they have been previosuly teleported, teleport back all the online (and optional whitelisted) users and ignore invalid users (and show a message)

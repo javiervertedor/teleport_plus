@@ -23,11 +23,6 @@ function integration.has_protector()
     return minetest.get_modpath("protector") and minetest.registered_nodes["protector:protect"] ~= nil
 end
 
--- Check if Travelnet mod is available
-function integration.has_travelnet()
-    return minetest.get_modpath("travelnet") and travelnet ~= nil
-end
-
 -- Check if Whitelist mod is available and whitelist.txt exists
 function integration.has_whitelist()
     if not minetest.get_modpath("whitelist") then
