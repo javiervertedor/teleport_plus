@@ -8,14 +8,9 @@ if not minetest.get_modpath("unified_inventory") then
 	error("[teleport_plus] This mod requires Unified Inventory. Please install it to continue.")
 end
 
--- Register privileges
+-- Register admin privilege
 minetest.register_privilege("teleport_plus_admin", {
-	description = "Full control over all teleport_plus features",
-	give_to_singleplayer = false
-})
-
-minetest.register_privilege("teleport_plus_user", {
-	description = "Access to teleport_plus basic teleportation (home and 5 waypoints)",
+	description = "Full control over all teleport_plus features (location and group management)",
 	give_to_singleplayer = false
 })
 

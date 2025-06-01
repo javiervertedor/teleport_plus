@@ -409,7 +409,7 @@ minetest.register_chatcommand("listgroups", {
 minetest.register_chatcommand("group", {
     description = "List users in a teleport group",
     params = "<groupname>",
-    privs = { teleport_plus_admin = true },
+    privs = {},  -- No special privileges required
     func = function(name, param)
         local groupname = param:trim()
         if groupname == "" then
@@ -420,6 +420,20 @@ minetest.register_chatcommand("group", {
 
         if not groups[groupname] then
             return false, "Group '"..groupname.."' does not exist"
+        end
+
+        -- Check if user is in the group or is an admin
+        local is_admin = minetest.check_player_privs(name, {teleport_plus_admin = true})
+        local is_member = false
+        for _, member in ipairs(groups[groupname]) do
+            if member == name then
+                is_member = true
+                break
+            end
+        end
+
+        if not (is_admin or is_member) then
+            return false, "You must be a member of the group to view its members"
         end
 
         local member_list = table.concat(groups[groupname], ", ")
@@ -489,7 +503,7 @@ minetest.register_chatcommand("givegroup", {
 minetest.register_chatcommand("groupmsg", {
     description = "Send a private message to all online users in a group",
     params = "<groupname> <message>",
-    privs = { teleport_plus_admin = true },
+    privs = {},  -- No special privileges required
     func = function(name, param)
         -- Split first word (groupname) from the rest (message)
         local groupname, message = param:match("^(%S+)%s+(.+)$")
@@ -502,6 +516,20 @@ minetest.register_chatcommand("groupmsg", {
 
         if not groups[groupname] then
             return false, "Group '"..groupname.."' does not exist"
+        end
+
+        -- Check if user is in the group or is an admin
+        local is_admin = minetest.check_player_privs(name, {teleport_plus_admin = true})
+        local is_member = false
+        for _, member in ipairs(groups[groupname]) do
+            if member == name then
+                is_member = true
+                break
+            end
+        end
+
+        if not (is_admin or is_member) then
+            return false, "You must be a member of the group to send messages to its members"
         end
 
         -- Get online players in the group
@@ -855,21 +883,101 @@ minetest.register_chatcommand("delloc", {
 
 -- Register the /tp command
 minetest.register_chatcommand("tp", {
-    description = "Teleport players to a location",
-    params = "<targets> <location>",
-    privs = { teleport_plus_admin = true },
+    description = "Teleport players to a location. Regular users can teleport themselves or group members to their own waypoints",
+    params = "<target> <location>",
+    privs = {},  -- No special privileges required for basic use
     func = function(name, param)
         -- Parse parameters
         local target_str, loc_name = param:match("^(%S+)%s+(.+)$")
         if not target_str or not loc_name then
-            return false, "Usage: /tp <targets> <location> (targets can be: me, all, groupname, or player1,player2,...)"
+            return false, "Usage: /tp <target> <location> (target can be: me or a player name)"
         end
+
+        -- Check admin privilege
+        local is_admin = minetest.check_player_privs(name, {teleport_plus_admin = true})
+        local groups = minetest.deserialize(storage:get_string("teleport_groups")) or {}
 
         -- Parse and validate targets
         local targets = parse_targets(target_str)
+          -- Regular users can teleport 'me', their group, or individual players from their groups
+        if not is_admin then
+            -- Check if trying to teleport all players
+            if targets.type == "all" then
+                return false, "Only administrators can teleport all players"
+            end
+            
+            -- For group teleportation, verify ownership
+            if targets.type == "group" then
+                local is_group_owner = false
+                if groups[target_str] then
+                    -- Check if user is in the group
+                    for _, member in ipairs(groups[target_str]) do
+                        if member == name then
+                            is_group_owner = true
+                            break
+                        end
+                    end
+                end
+                
+                if not is_group_owner then
+                    return false, "You can only teleport groups that you are a member of"
+                end
+            end
+
+            -- For individual players
+            if targets.type == "player" then
+                -- If not teleporting self, verify group membership
+                if targets.players[1] ~= "me" and targets.players[1] ~= name then
+                    local can_teleport = false
+                    -- Check if target is in any of the user's groups
+                    for group_name, members in pairs(groups) do
+                        local user_in_group = false
+                        local target_in_group = false
+                        
+                        for _, member in ipairs(members) do
+                            if member == name then
+                                user_in_group = true
+                            end
+                            if member == targets.players[1] then
+                                target_in_group = true
+                            end
+                        end
+                        
+                        if user_in_group and target_in_group then
+                            can_teleport = true
+                            break
+                        end
+                    end
+                    
+                    if not can_teleport then
+                        return false, "You can only teleport players who are in the same group as you"
+                    end
+                end
+            end
+        end
         
         -- Get and validate destination
         local dest_pos = get_location_pos(loc_name, name)
+          -- Regular users can only teleport to their own waypoints
+        if not is_admin then
+            local waypoints = integration.get_unified_inventory_waypoints(name)
+            -- Check if trying to teleport to home
+            if loc_name:lower() == "home" then
+                -- Check if target is self and has home privilege
+                if targets.type == "player" and (targets.players[1] == "me" or targets.players[1] == name) then
+                    if not minetest.check_player_privs(name, {home = true}) then
+                        return false, "You need the 'home' privilege to teleport to your home"
+                    end
+                else
+                    return false, "You cannot teleport others to your home location"
+                end
+            end
+            -- Check if destination is user's own waypoint
+            if not waypoints[loc_name] then
+                return false, "You can only teleport players to your own waypoints"
+            end
+        end
+        
         if not dest_pos then
             return false, "Location '"..loc_name.."' does not exist"
         end
@@ -955,11 +1063,14 @@ minetest.register_chatcommand("tp", {
 minetest.register_chatcommand("tprestore", {
     description = "Return players to their previous location",
     params = "<targets>",
-    privs = { teleport_plus_admin = true },
+    privs = {},  -- No special privileges required for basic use
     func = function(name, param)
         if not param or param:trim() == "" then
-            return false, "Usage: /tprestore <targets> (targets can be: me, all, groupname, or player1,player2,...)"
+            return false, "Usage: /tprestore <targets> (targets can be: me, groupname, or player name)"
         end
+
+        -- Check admin privilege
+        local is_admin = minetest.check_player_privs(name, {teleport_plus_admin = true})
 
         -- Parse and validate targets
         local targets = parse_targets(param:trim())
