@@ -13,10 +13,8 @@ This mod provides immersive, teacher-friendly teleportation features. It allows 
 - Group management system with item distribution and messaging
 - Scheduled teleports for automatic class movement
 - Return teleport to bring players back to their original location
-- Wooden signpost or banner marker nodes to visually represent destinations
 - Optional rule enforcement per location (PvP, unbreakable zones)
-- Minimap HUD waypoints to guide navigation
-- No overlap with travelnet or sethome mods
+- Optional HUD waypoints to guide navigation
 
 ## Dependencies
 - [Unified Inventory](https://content.luanti.org/packages/RealBadAngel/unified_inventory/): Integration with Unified Inventory’s waypoint system (5 per player)
@@ -24,17 +22,16 @@ This mod provides immersive, teacher-friendly teleportation features. It allows 
 ## Optional dependencies
 - [Areas](https://content.luanti.org/packages/ShadowNinja/areas/)
 - [Protector Redo](https://content.luanti.org/packages/TenPlus1/protector/)
-- [Travelnet](https://content.luanti.org/packages/mt-mods/travelnet/)
 - [Whiter List](https://content.luanti.org/packages/AntumDeluge/whitelist/)
 
 ## Commands
 
 | Command                                        | Description                                      |
 |-----------------------------------------------|--------------------------------------------------|
-| `/setloc <pos> <name> [pvp=on\|off] [editable=on\|off] [radius=number_of_blocks]` | Set a teleport location at a given position (default current position)     |
+| `/setloc <pos> <name> [pvp=on\|off] [editable=on\|off] [radius=number_of_blocks] [HUD=on\|off]` | Set a teleport location at a given position (default current position)     |
 | `/delloc <name>`                               | Delete a saved location                          |
 | `/listloc`                                     | List available teleport locations                |
-| `/tp <targets> <name>`                         | Teleport players (me, all, or list) to a location |
+| `/tp <targets> <location>`                         | Teleport players (me, all, or list) to a location |
 | `/tprestore <targets>`                         | Return players to their previous position        |
 | `/setgroup <group> user1, user2, ...`          | Set a group of users                            |
 | `/groupadd <group> user1, user2, ...`          | Adds users to a specific group                  |
@@ -44,7 +41,8 @@ This mod provides immersive, teacher-friendly teleportation features. It allows 
 | `/group <group>`                               | Lists users in a group                          |
 | `/givegroup <group> <item> [quantity]`         | Give items to all online users in a group (max 99) |
 | `/groupmsg <group> <message>`                  | Send a private message to all online users in a group |
-| `/schedule_teleport <targets> <location> <day1,day2> <HH:MM>` | Schedule users or group teleport              |
+| `/schedule_tp <targets> <location> <day1,day2> <HH:MM> [name=<namestring>] [repeat=on/off]` | Schedule users or group teleport              |
+| `/delschedule <name>`                         | Deletes a teleport schedule                        |
 
 Note: `<targets>` can be `me`, `all`, groups `Team1` or `name1,name2`
 

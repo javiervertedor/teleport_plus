@@ -2,6 +2,49 @@
 local storage = minetest.get_mod_storage()
 local integration = dofile(minetest.get_modpath("teleport_plus").."/mods_integration.lua")
 
+-- HUD management
+local player_huds = {}
+
+local function update_location_hud(player_name)
+    local player = minetest.get_player_by_name(player_name)
+    if not player then return end
+
+    -- Remove existing HUDs for this player
+    if player_huds[player_name] then
+        for _, id in ipairs(player_huds[player_name]) do
+            player:hud_remove(id)
+        end
+    end
+    player_huds[player_name] = {}
+
+    -- Get locations
+    local locations = minetest.deserialize(storage:get_string("teleport_locations")) or {}
+    
+    -- Add HUD for each location with HUD enabled
+    for loc_name, loc_data in pairs(locations) do
+        if loc_data.show_hud then
+            local hud_id = player:hud_add({
+                hud_elem_type = "waypoint",
+                name = loc_name,
+                text = "m",
+                number = 0xFFFFFF,
+                world_pos = loc_data.pos
+            })
+            table.insert(player_huds[player_name], hud_id)
+        end
+    end
+end
+
+-- Update HUDs when players join
+minetest.register_on_joinplayer(function(player)
+    minetest.after(1, update_location_hud, player:get_player_name())
+end)
+
+-- Remove HUDs when players leave
+minetest.register_on_leaveplayer(function(player)
+    player_huds[player:get_player_name()] = nil
+end)
+
 -- Logging helper function
 local function log_action(action, name, message)
     minetest.log("action", string.format("[teleport_plus] %s by %s: %s", action, name, message))
@@ -368,8 +411,8 @@ minetest.register_chatcommand("groupmsg", {
 -- LOCATION COMMANDS
 -- Register the /setloc command
 minetest.register_chatcommand("setloc", {
-    description = "Set a teleport location with optional protection",
-    params = "[pos] <name> [pvp=on|off] [nobuild=on|off] [radius=number]",
+    description = "Set a teleport location with optional protection and HUD",
+    params = "[pos] <name> [pvp=on|off] [nobuild=on|off] [radius=number] [HUD=on|off]",
     privs = { teleport_plus_admin = true },
     func = function(name, param)
         -- Get stored locations first
@@ -384,7 +427,7 @@ minetest.register_chatcommand("setloc", {
         end
 
         if #params < 1 then
-            return false, "Usage: /setloc [pos] <name> [pvp=on|off] [nobuild=on|off] [radius=number]"
+            return false, "Usage: /setloc [pos] <name> [pvp=on|off] [nobuild=on|off] [radius=number] [HUD=on|off]"
         end
 
         local pos
@@ -491,8 +534,8 @@ minetest.register_chatcommand("setloc", {
         local pvp = true
         local nobuild = false
         local radius = 5
+        local show_hud = true -- Default HUD to on
         if param_map["pvp"] then
-            minetest.log("info", "[teleport_plus] Setting pvp=" .. param_map["pvp"])
             if param_map["pvp"] == "on" then
                 pvp = true
             elseif param_map["pvp"] == "off" then
@@ -502,7 +545,6 @@ minetest.register_chatcommand("setloc", {
             end
         end
         if param_map["nobuild"] then
-            minetest.log("info", "[teleport_plus] Setting nobuild=" .. param_map["nobuild"])
             if param_map["nobuild"] == "on" then
                 nobuild = true
             elseif param_map["nobuild"] == "off" then
@@ -512,10 +554,18 @@ minetest.register_chatcommand("setloc", {
             end
         end
         if param_map["radius"] then
-            minetest.log("info", "[teleport_plus] Setting radius=" .. param_map["radius"])
             radius = tonumber(param_map["radius"]) or 5
             if radius > 30 then radius = 30 end
             if radius < 0 then radius = 0 end
+        end
+        if param_map["hud"] then
+            if param_map["hud"] == "on" then
+                show_hud = true
+            elseif param_map["hud"] == "off" then
+                show_hud = false
+            else
+                return false, "Invalid HUD value. Use 'on' or 'off'"
+            end
         end
 
         minetest.log("action", string.format("[teleport_plus] /setloc parsed params: name='%s', pvp=%s, nobuild=%s, radius=%d", 
@@ -562,13 +612,19 @@ minetest.register_chatcommand("setloc", {
             nobuild = nobuild == true,
             radius = radius,
             owner = name,
-            area_id = area_id
+            area_id = area_id,
+            show_hud = show_hud == true
         }
         storage:set_string("teleport_locations", minetest.serialize(locations))
 
+        -- Update HUD for all players
+        for _, player in ipairs(minetest.get_connected_players()) do
+            update_location_hud(player:get_player_name())
+        end
+
         -- Modify the final success message
         return true, string.format(
-            "Location '%s' set at %d,%d,%d with radius=%d%s, pvp=%s, nobuild=%s",
+            "Location '%s' set at %d,%d,%d with radius=%d%s, pvp=%s, nobuild=%s, HUD=%s",
             loc_name,
             math.floor(pos.x),
             math.floor(pos.y),
@@ -576,7 +632,8 @@ minetest.register_chatcommand("setloc", {
             radius,
             radius == 30 and " (max radius 30)" or "",
             pvp and "on" or "off",
-            nobuild and "on" or "off"
+            nobuild and "on" or "off",
+            show_hud and "on" or "off"
         )
     end
 })
@@ -608,6 +665,7 @@ minetest.register_chatcommand("listloc", {
             if not data.is_waypoint then
                 if data.nobuild then table.insert(flags, "no-build") end
                 if not data.pvp then table.insert(flags, "no-pvp") end
+                if data.show_hud then table.insert(flags, "hud") end
             end
             local flags_str = #flags > 0 and " (" .. table.concat(flags, ", ") .. ")" or ""
             
@@ -663,8 +721,13 @@ minetest.register_chatcommand("delloc", {
 
         locations[loc_name] = nil
         storage:set_string("teleport_locations", minetest.serialize(locations))
-        log_action("Location Deleted", name, "Location: " .. loc_name)
 
+        -- Update HUD for all players after location deletion
+        for _, player in ipairs(minetest.get_connected_players()) do
+            update_location_hud(player:get_player_name())
+        end
+
+        log_action("Location Deleted", name, "Location: " .. loc_name)
         return true, "Deleted location '"..loc_name.."'"
     end
 })
