@@ -2,6 +2,127 @@
 local storage = minetest.get_mod_storage()
 local integration = dofile(minetest.get_modpath("teleport_plus").."/mods_integration.lua")
 
+-- Teleport history tracking
+local teleport_history = {}
+
+-- Helper function to parse and validate targets
+local function parse_targets(target_str)
+    if target_str == "me" then
+        return { type = "player", players = { target_str } }
+    elseif target_str == "all" then
+        return { type = "all" }
+    else
+        -- Check if it's a group
+        local groups = minetest.deserialize(storage:get_string("teleport_groups")) or {}
+        if groups[target_str] then
+            return { type = "group", group = target_str, players = groups[target_str] }
+        end
+        -- Otherwise treat as comma-separated player list
+        local players = {}
+        for player in target_str:gmatch("([^,]+)") do
+            table.insert(players, player:trim())
+        end
+        return { type = "players", players = players }
+    end
+end
+
+-- Helper function to get location position
+local function get_location_pos(loc_name, player_name)
+    -- First check custom locations
+    local locations = minetest.deserialize(storage:get_string("teleport_locations")) or {}
+    if locations[loc_name] then
+        return locations[loc_name].pos
+    end
+
+    -- Then check waypoints
+    local waypoints = integration.get_unified_inventory_waypoints(player_name)
+    if waypoints[loc_name] then
+        return waypoints[loc_name].pos
+    end
+
+    -- Finally check if it's "home"
+    if loc_name:lower() == "home" then
+        return integration.get_home_position(player_name)
+    end
+
+    return nil
+end
+
+-- Helper function to calculate a grid of safe positions
+local function get_safe_grid_positions(center_pos, player_count)
+    local positions = {}
+    local unsafe_spots = {}
+    local grid_size = math.ceil(math.sqrt(player_count))
+    local spacing = 2 -- Distance between players
+    local start_x = center_pos.x - math.floor(grid_size/2) * spacing
+    local start_z = center_pos.z - math.floor(grid_size/2) * spacing
+
+    for row = 0, grid_size-1 do
+        for col = 0, grid_size-1 do
+            if #positions < player_count then
+                local pos = {
+                    x = start_x + (col * spacing),
+                    y = center_pos.y,
+                    z = start_z + (row * spacing)
+                }
+                
+                -- Check if position is safe
+                local safe_pos, safety_msg = integration.is_safe_position(pos)
+                if safe_pos then
+                    table.insert(positions, pos)
+                else
+                    table.insert(unsafe_spots, {
+                        pos = pos,
+                        reason = safety_msg
+                    })
+                end
+            end
+        end
+    end
+
+    return positions, unsafe_spots
+end
+
+-- Helper function to validate and filter online players
+local function get_online_players(targets, command_user)
+    local online = {}
+    local offline = {}
+    local invalid = {}
+    
+    local all_online = {}
+    for _, player in ipairs(minetest.get_connected_players()) do
+        all_online[player:get_player_name()] = true
+    end
+
+    local target_players = {}
+    if targets.type == "all" then
+        for name, _ in pairs(all_online) do
+            table.insert(target_players, name)
+        end
+    elseif targets.type == "player" and targets.players[1] == "me" then
+        target_players = { command_user }
+    else
+        target_players = targets.players
+    end
+
+    -- Check whitelist if enabled
+    local whitelist = integration.has_whitelist() and integration.get_whitelist() or nil
+
+    for _, name in ipairs(target_players) do
+        if not minetest.get_auth_handler().get_auth(name) then
+            table.insert(invalid, name)
+        elseif whitelist and not whitelist[name] then
+            table.insert(invalid, name)
+        elseif all_online[name] then
+            table.insert(online, name)
+        else
+            table.insert(offline, name)
+        end
+    end
+
+    return online, offline, invalid
+end
+
 -- HUD management
 local player_huds = {}
 
@@ -732,9 +853,169 @@ minetest.register_chatcommand("delloc", {
     end
 })
 
--- command /tp <targets> <location>
--- save their original location and a flag that they have been tp 
--- teleport all the online (and optional whitelisted) users
--- ignore invalid users (and show a message)
--- check that the destination location exists and it's safe
--- do a similar task with /tprestore: check they have been previosuly teleported, teleport back all the online (and optional whitelisted) users and ignore invalid users (and show a message)
+-- Register the /tp command
+minetest.register_chatcommand("tp", {
+    description = "Teleport players to a location",
+    params = "<targets> <location>",
+    privs = { teleport_plus_admin = true },
+    func = function(name, param)
+        -- Parse parameters
+        local target_str, loc_name = param:match("^(%S+)%s+(.+)$")
+        if not target_str or not loc_name then
+            return false, "Usage: /tp <targets> <location> (targets can be: me, all, groupname, or player1,player2,...)"
+        end
+
+        -- Parse and validate targets
+        local targets = parse_targets(target_str)
+        
+        -- Get and validate destination
+        local dest_pos = get_location_pos(loc_name, name)
+        if not dest_pos then
+            return false, "Location '"..loc_name.."' does not exist"
+        end
+
+        -- Check if destination is safe
+        local safe_pos, safety_msg = integration.is_safe_position(dest_pos)
+        if not safe_pos then
+            return false, "Destination is not safe: "..safety_msg
+        end
+
+        -- Get online players and track invalid/offline players
+        local online_players, offline_players, invalid_players = get_online_players(targets, name)
+
+        if #online_players == 0 then
+            return false, "No valid online players to teleport"
+        end
+
+        -- Calculate grid positions for all players
+        local safe_positions, unsafe_spots = get_safe_grid_positions(dest_pos, #online_players)
+        
+        if #safe_positions == 0 then
+            return false, "No safe positions available around destination"
+        end
+
+        -- Teleport each online player
+        local teleported = {}
+        local unsafe_players = {}
+        local pos_index = 1
+
+        for _, player_name in ipairs(online_players) do
+            local player = minetest.get_player_by_name(player_name)
+            if player then
+                -- Store current position in history
+                local current_pos = player:get_pos()
+                if not teleport_history[player_name] then
+                    teleport_history[player_name] = {}
+                end
+                table.insert(teleport_history[player_name], current_pos)
+                
+                -- Try to find a safe position
+                local found_safe_pos = false
+                while pos_index <= #safe_positions do
+                    local target_pos = safe_positions[pos_index]
+                    -- Double check if position is still safe
+                    local is_safe, _ = integration.is_safe_position(target_pos)
+                    if is_safe then
+                        player:set_pos(target_pos)
+                        table.insert(teleported, player_name)
+                        found_safe_pos = true
+                        pos_index = pos_index + 1
+                        break
+                    end
+                    pos_index = pos_index + 1 -- Try next position
+                end
+                
+                if not found_safe_pos then
+                    table.insert(unsafe_players, player_name)
+                end
+            end
+        end        -- Prepare result message
+        local message = "Teleport results:\n"
+        if #teleported > 0 then
+            message = message.."✓ Successfully teleported: "..table.concat(teleported, ", ").."\n"
+        end
+        if #unsafe_players > 0 then
+            message = message.."⚠ Could not find safe positions for: "..table.concat(unsafe_players, ", ").."\n"
+        end
+        if #offline_players > 0 then
+            message = message.."ⓘ Offline players skipped: "..table.concat(offline_players, ", ").."\n"
+        end
+        if #invalid_players > 0 then
+            message = message.."✗ Invalid player names: "..table.concat(invalid_players, ", ").."\n"
+        end
+        if #unsafe_spots > 0 then
+            message = message.."⚠ "..#unsafe_spots.." grid positions were unsafe and skipped"
+        end
+
+        return true, message
+    end
+})
+
+-- Register the /tprestore command
+minetest.register_chatcommand("tprestore", {
+    description = "Return players to their previous location",
+    params = "<targets>",
+    privs = { teleport_plus_admin = true },
+    func = function(name, param)
+        if not param or param:trim() == "" then
+            return false, "Usage: /tprestore <targets> (targets can be: me, all, groupname, or player1,player2,...)"
+        end
+
+        -- Parse and validate targets
+        local targets = parse_targets(param:trim())
+        
+        -- Get online players and track invalid/offline players
+        local online_players, offline_players, invalid_players = get_online_players(targets, name)
+
+        if #online_players == 0 then
+            return false, "No valid online players to restore"
+        end
+
+        -- Restore each online player
+        local restored = {}
+        local no_history = {}
+        
+        for _, player_name in ipairs(online_players) do
+            local player = minetest.get_player_by_name(player_name)
+            local history = teleport_history[player_name]
+              if player and history and #history > 0 then
+                -- Get the last position from history
+                local last_pos = history[#history]
+                -- Check if position is still safe
+                local safe_pos, _ = integration.is_safe_position(last_pos)
+                if safe_pos then
+                    player:set_pos(last_pos)
+                    table.insert(restored, player_name)
+                    -- Clear history after restore
+                    teleport_history[player_name] = nil
+                else
+                    table.insert(no_history, player_name.." (unsafe return position)")
+                end
+            else
+                table.insert(no_history, player_name)
+            end
+        end
+
+        -- Prepare result message
+        local result_msg = string.format("Restored %d player(s) to previous location", #restored)
+        
+        -- Add warnings about offline/invalid/no-history players if any
+        local warnings = {}
+        if #no_history > 0 then
+            table.insert(warnings, #no_history.." player(s) with no valid history: "..table.concat(no_history, ", "))
+        end
+        if #offline_players > 0 then
+            table.insert(warnings, #offline_players.." player(s) offline: "..table.concat(offline_players, ", "))
+        end
+        if #invalid_players > 0 then
+            table.insert(warnings, #invalid_players.." invalid player(s): "..table.concat(invalid_players, ", "))
+        end
+        
+        if #warnings > 0 then
+            result_msg = result_msg .. " ("..table.concat(warnings, "; ")..")"
+        end
+
+        log_action("Teleport Restore", name, string.format("Restored %s to previous locations", table.concat(restored, ", ")))
+        return true, result_msg
+    end
+})
