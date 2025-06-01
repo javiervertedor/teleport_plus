@@ -31,15 +31,16 @@ This mod provides immersive, teacher-friendly teleportation features. It allows 
 
 | Command                                        | Description                                      |
 |-----------------------------------------------|--------------------------------------------------|
-| `/setloc <pos> <name> [pvp=on\|off] [editable=on\|off]` | Set a teleport location at a given position (default current position)     |
-| `/tp <targets> <name>`                         | Teleport players (me, all, or list) to a location |
+| `/setloc <pos> <name> [pvp=on\|off] [editable=on\|off] [radius=number_of_blocks]` | Set a teleport location at a given position (default current position)     |
 | `/delloc <name>`                               | Delete a saved location                          |
 | `/listloc`                                     | List available teleport locations                |
+| `/tp <targets> <name>`                         | Teleport players (me, all, or list) to a location |
 | `/tprestore <targets>`                         | Return players to their previous position        |
 | `/setgroup <group> user1, user2, ...`          | Set a group of users                            |
 | `/groupadd <group> user1, user2, ...`          | Adds users to a specific group                  |
 | `/groupremove <group> user1, user2, ...`       | Removes users from a specific group             |
-| `/deletegroup <group>`                         | Deletes a group of users                        |
+| `/delgroup <group>`                         | Deletes a group of users                        |
+| `/listgroups`                               | Lists all existing groups                          |
 | `/group <group>`                               | Lists users in a group                          |
 | `/givegroup <group> <item> [quantity]`         | Give items to all online users in a group (max 99) |
 | `/groupmsg <group> <message>`                  | Send a private message to all online users in a group |
