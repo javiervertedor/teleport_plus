@@ -46,10 +46,6 @@ This mod provides immersive, teacher-friendly teleportation features. It allows 
 
 Note: `<targets>` can be `me`, `all`, groups `Team1` or `name1,name2`
 
-## Marker Nodes
-
-Teachers/admins can place visual markers (`tp_marker:signpost`) at teleport destinations. These do not teleport on right-click and act as immersive labels.
-
 ## License
 
 This project is licensed under the [Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/) license.
