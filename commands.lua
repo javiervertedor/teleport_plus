@@ -1144,6 +1144,17 @@ minetest.register_chatcommand("tp", {
         for _, player_name in ipairs(online_players) do
             local player = minetest.get_player_by_name(player_name)
             if player then
+                -- Only store the original position if not already stored
+                if not teleport_history[player_name] then
+                    teleport_history[player_name] = player:get_pos()
+                end
+            end
+        end
+
+        -- Try to find a safe position for each player
+        for _, player_name in ipairs(online_players) do
+            local player = minetest.get_player_by_name(player_name)
+            if player then
                 -- Store current position in history
                 local current_pos = player:get_pos()
                 if not teleport_history[player_name] then
@@ -1258,16 +1269,12 @@ minetest.register_chatcommand("tprestore", {
         local no_history = {}
         for _, player_name in ipairs(online_players) do
             local player = minetest.get_player_by_name(player_name)
-            local history = teleport_history[player_name]
-            if player and history and #history > 0 then
-                -- Get the last position from history
-                local last_pos = history[#history]
-                -- Check if position is still safe
+            local last_pos = teleport_history[player_name]
+            if player and last_pos then
                 local safe_pos, _ = integration.is_safe_position(last_pos)
                 if safe_pos then
                     player:set_pos(last_pos)
                     table.insert(restored, player_name)
-                    -- Clear history after restore
                     teleport_history[player_name] = nil
                 else
                     table.insert(no_history, player_name.." (unsafe return position)")
@@ -1960,7 +1967,6 @@ minetest.register_chatcommand("setloc", {
         local radius = 5
         local show_hud = true -- Default HUD to on
         if param_map["pvp"] then
-           
             if param_map["pvp"] == "on" then
                 pvp = true
             elseif param_map["pvp"] == "off" then
@@ -2230,6 +2236,17 @@ minetest.register_chatcommand("tp", {
         for _, player_name in ipairs(online_players) do
             local player = minetest.get_player_by_name(player_name)
             if player then
+                -- Only store the original position if not already stored
+                if not teleport_history[player_name] then
+                    teleport_history[player_name] = player:get_pos()
+                end
+            end
+        end
+
+        -- Try to find a safe position for each player
+        for _, player_name in ipairs(online_players) do
+            local player = minetest.get_player_by_name(player_name)
+            if player then
                 -- Store current position in history
                 local current_pos = player:get_pos()
                 if not teleport_history[player_name] then
@@ -2344,16 +2361,12 @@ minetest.register_chatcommand("tprestore", {
         local no_history = {}
         for _, player_name in ipairs(online_players) do
             local player = minetest.get_player_by_name(player_name)
-            local history = teleport_history[player_name]
-            if player and history and #history > 0 then
-                -- Get the last position from history
-                local last_pos = history[#history]
-                -- Check if position is still safe
+            local last_pos = teleport_history[player_name]
+            if player and last_pos then
                 local safe_pos, _ = integration.is_safe_position(last_pos)
                 if safe_pos then
                     player:set_pos(last_pos)
                     table.insert(restored, player_name)
-                    -- Clear history after restore
                     teleport_history[player_name] = nil
                 else
                     table.insert(no_history, player_name.." (unsafe return position)")
