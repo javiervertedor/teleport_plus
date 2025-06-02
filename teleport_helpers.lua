@@ -24,7 +24,7 @@ function M.parse_targets(target_str, storage, minetest)
     end
     local groups = minetest.deserialize(storage:get_string("teleport_groups")) or {}
     if groups[unquoted_str] then
-        return { type = "group", players = groups[unquoted_str] }
+        return { type = "group", groupname = unquoted_str, players = groups[unquoted_str] }
     end
     local players = {}
     for player in unquoted_str:gmatch("[^,]+") do

@@ -304,7 +304,10 @@ return {
     parse_days = parse_days,
     execute_schedule = execute_schedule,
     reload = function()
-        schedules = minetest.deserialize(storage:get_string("teleport_schedules")) or {}
+        local new_schedules = minetest.deserialize(storage:get_string("teleport_schedules")) or {}
+        -- Clear and repopulate the schedules table in-place
+        for k in pairs(schedules) do schedules[k] = nil end
+        for k, v in pairs(new_schedules) do schedules[k] = v end
         return schedules
     end,
     validate_targets = validate_targets,
