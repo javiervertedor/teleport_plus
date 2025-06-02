@@ -1,48 +1,183 @@
 -- Initialize mod storage
 local storage = minetest.get_mod_storage()
 local integration = dofile(minetest.get_modpath("teleport_plus").."/mods_integration.lua")
+-- Use the validate_targets and validate_location from the schedules module
+local schedule_module = dofile(minetest.get_modpath("teleport_plus").."/schedules.lua")
+local schedules = schedule_module.schedules  -- properly point to actual data
+local teleport_helpers = dofile(minetest.get_modpath("teleport_plus") .. "/teleport_helpers.lua")
+
+-- String handling utility functions
+local function strip_quotes(str)
+    return str:match('^"(.-)"$') or str:match("^'(.-)'$") or str
+end
+
+local function split_quoted(str, sep)
+    local result = {}
+    local current = ""
+    local in_quotes = false
+    local quote_char = nil
+    
+    for i = 1, #str do
+        local c = str:sub(i,i)
+        if (c == '"' or c == "'") and not in_quotes then
+            in_quotes = true
+            quote_char = c
+        elseif c == quote_char and in_quotes then
+            in_quotes = false
+            quote_char = nil
+        elseif (c == sep or c == " ") and not in_quotes then
+            if current ~= "" then
+                table.insert(result, current)
+                current = ""
+            end
+        else
+            current = current .. c
+        end
+    end
+    
+    if current ~= "" then
+        table.insert(result, current)
+    end
+    
+    return result
+end
 
 -- Teleport history tracking
 local teleport_history = {}
 
--- Helper function to parse and validate targets
-local function parse_targets(target_str)
-    if target_str == "me" then
-        return { type = "player", players = { target_str } }
-    elseif target_str == "all" then
-        return { type = "all" }
-    else
-        -- Check if it's a group
-        local groups = minetest.deserialize(storage:get_string("teleport_groups")) or {}
-        if groups[target_str] then
-            return { type = "group", group = target_str, players = groups[target_str] }
-        end
-        -- Otherwise treat as comma-separated player list
-        local players = {}
-        for player in target_str:gmatch("([^,]+)") do
-            table.insert(players, player:trim())
-        end
-        return { type = "players", players = players }
+-- Shared teleport functions
+local function validate_target_permissions(name, targets, target_str)
+    local is_admin = minetest.check_player_privs(name, {teleport_plus_admin = true})
+    
+    -- Admins can teleport anyone
+    if is_admin then
+        return true
     end
+    
+    -- Non-admins can only teleport themselves
+    if targets.type == "player" then
+        -- Allow 'me' or their own name
+        if targets.players[1] == "me" or targets.players[1] == name then
+            return true
+        end
+        -- Don't allow teleporting others
+        return false, "You don't have permission to teleport other players"
+    elseif targets.type == "group" then
+        -- Non-admins cannot teleport groups
+        return false, "Only admins can teleport groups"
+    elseif targets.type == "all" then
+        -- Non-admins cannot teleport everyone
+        return false, "Only admins can teleport all players"
+    end
+    
+    return false, "You don't have permission to teleport these players"
+end
+
+local function validate_location_permissions(name, targets, loc_name)
+    local is_admin = minetest.check_player_privs(name, {teleport_plus_admin = true})
+    
+    -- First check if we're dealing with admin
+    -- Admins can use any location
+    if is_admin then
+        return true
+    end
+    
+    -- Check if location exists as a waypoint or location
+    local waypoints = integration.get_unified_inventory_waypoints(name)
+    local locations = minetest.deserialize(storage:get_string("teleport_locations")) or {}
+    
+    -- Check if trying to teleport to home
+    if loc_name:lower() == "home" then
+        -- Only allow teleporting self to home
+        if targets.type == "player" and (targets.players[1] == "me" or targets.players[1] == name) then
+            if minetest.check_player_privs(name, {home = true}) then
+                return true
+            else
+                return false, "You need the 'home' privilege to teleport to your home"
+            end
+        else
+            return false, "You cannot teleport others to your home location"
+        end
+    end
+      -- Check all waypoints first
+    for wp_name, wp_data in pairs(waypoints) do
+        if wp_name:lower() == loc_name:lower() then
+            -- Allow only if it's their own waypoint
+            if wp_data.owner == name then
+                return true
+            end
+            return false, "You don't have permission to use this waypoint"
+        end
+    end
+    
+    -- Then check locations
+    if locations[loc_name] then
+        -- Allow only if it's their own location
+        if locations[loc_name].owner == name then
+            return true
+        end
+        return false, string.format("You don't have permission to use location '%s'", loc_name)
+    end
+    
+    return false, string.format("Location '%s' does not exist or you don't have permission to use it", loc_name)
+end
+
+local function validate_group_exists(target_str, groups)
+    -- Strip quotes from group name
+    local group_name = strip_quotes(target_str:trim())
+    
+    if not groups[group_name] then
+        return false, "Group '"..group_name.."' does not exist"
+    end
+
+    -- Validate all players in the group exist
+    local invalid_players = {}
+    for _, player_name in ipairs(groups[group_name]) do
+        if not minetest.player_exists(player_name) then
+            table.insert(invalid_players, player_name)
+        end
+    end
+
+    if #invalid_players > 0 then
+        return false, string.format(
+            "The following players in group '%s' do not exist: %s",
+            group_name,
+            table.concat(invalid_players, ", ")
+        )
+    end
+
+    -- Group exists and all players are valid
+    return true
 end
 
 -- Helper function to get location position
-local function get_location_pos(loc_name, player_name)
+local function get_location_pos(loc_name, owner_name)
+    -- Always fully strip quotes and whitespace
+    local unquoted_name = loc_name:gsub('^"(.-)"$', '%1'):gsub("^'(.-)'$", '%1'):trim()    local is_admin = minetest.check_player_privs(owner_name, {teleport_plus_admin = true})
+    
     -- First check custom locations
     local locations = minetest.deserialize(storage:get_string("teleport_locations")) or {}
-    if locations[loc_name] then
-        return locations[loc_name].pos
+    if locations[unquoted_name] then
+        -- For non-admins, only return location if they own it
+        if is_admin or locations[unquoted_name].owner == owner_name then
+            return locations[unquoted_name].pos
+        end
     end
 
-    -- Then check waypoints
-    local waypoints = integration.get_unified_inventory_waypoints(player_name)
-    if waypoints[loc_name] then
-        return waypoints[loc_name].pos
+    -- Check Unified Inventory waypoints - only for owner or admin
+    local waypoints = integration.get_unified_inventory_waypoints(owner_name)
+    for wp_name, wp_data in pairs(waypoints) do
+        if wp_name:lower() == unquoted_name:lower() then
+            -- Allow admins and waypoint owners
+            if is_admin or wp_data.owner == owner_name then
+                return wp_data.pos
+            end
+        end
     end
 
     -- Finally check if it's "home"
-    if loc_name:lower() == "home" then
-        return integration.get_home_position(player_name)
+    if unquoted_name:lower() == "home" then
+        return integration.get_home_position(owner_name)
     end
 
     return nil
@@ -84,29 +219,44 @@ local function get_safe_grid_positions(center_pos, player_count)
 end
 
 -- Helper function to validate and filter online players
-local function get_online_players(targets, command_user)
+local function get_online_players(targets, caller_name)
     local online = {}
     local offline = {}
     local invalid = {}
     
+    if not targets then
+        return online, offline, invalid
+    end
+
+    -- Get all currently online players
     local all_online = {}
     for _, player in ipairs(minetest.get_connected_players()) do
         all_online[player:get_player_name()] = true
     end
 
-    local target_players = {}
+    -- Get whitelist if available
+    local whitelist = integration.has_whitelist() and integration.get_whitelist()
+
+    -- Handle special cases
     if targets.type == "all" then
         for name, _ in pairs(all_online) do
-            table.insert(target_players, name)
+            if not whitelist or whitelist[name] then
+                table.insert(online, name)
+            end
         end
-    elseif targets.type == "player" and targets.players[1] == "me" then
-        target_players = { command_user }
-    else
-        target_players = targets.players
+        return online, offline, invalid
     end
 
-    -- Check whitelist if enabled
-    local whitelist = integration.has_whitelist() and integration.get_whitelist() or nil
+    local target_players = {}
+    if targets.type == "player" then
+        if targets.players[1] == "me" then
+            target_players = {caller_name}
+        else
+            target_players = targets.players
+        end
+    elseif targets.type == "group" then
+        target_players = targets.players
+    end
 
     for _, name in ipairs(target_players) do
         if not minetest.get_auth_handler().get_auth(name) then
@@ -119,7 +269,7 @@ local function get_online_players(targets, command_user)
             table.insert(offline, name)
         end
     end
-
+    
     return online, offline, invalid
 end
 
@@ -883,103 +1033,47 @@ minetest.register_chatcommand("delloc", {
 
 -- Register the /tp command
 minetest.register_chatcommand("tp", {
-    description = "Teleport players to a location. Regular users can teleport themselves or group members to their own waypoints",
+    description = "Teleport players to a location",
     params = "<target> <location>",
     privs = {},  -- No special privileges required for basic use
     func = function(name, param)
-        -- Parse parameters
-        local target_str, loc_name = param:match("^(%S+)%s+(.+)$")
+        -- Parse parameters - support both quoted and unquoted names
+        local target_str, loc_name
+        
+        -- First try to parse as quoted strings
+        if param:match('^".-"') or param:match("^'.-'") then
+            target_str = param:match('^"([^"]+)"') or param:match("^'([^']+')")
+            local rest = param:sub((target_str and #target_str + 3) or 0):match("^%s*(.+)$")
+            if rest then
+                loc_name = rest:match('^"([^"]+)"$') or rest:match("^'([^']+)'$") or rest:match("^(%S.*)$")
+            end
+        else
+            -- If no quotes, try simple space split
+            target_str, loc_name = param:match("^(%S+)%s+(%S.*)$")
+        end
+
         if not target_str or not loc_name then
-            return false, "Usage: /tp <target> <location> (target can be: me or a player name)"
+            return false, "Usage: /tp <target> <location>"
         end
 
-        -- Check admin privilege
-        local is_admin = minetest.check_player_privs(name, {teleport_plus_admin = true})
-        local groups = minetest.deserialize(storage:get_string("teleport_groups")) or {}
-
-        -- Parse and validate targets
-        local targets = parse_targets(target_str)
-          -- Regular users can teleport 'me', their group, or individual players from their groups
-        if not is_admin then
-            -- Check if trying to teleport all players
-            if targets.type == "all" then
-                return false, "Only administrators can teleport all players"
-            end
-            
-            -- For group teleportation, verify ownership
-            if targets.type == "group" then
-                local is_group_owner = false
-                if groups[target_str] then
-                    -- Check if user is in the group
-                    for _, member in ipairs(groups[target_str]) do
-                        if member == name then
-                            is_group_owner = true
-                            break
-                        end
-                    end
-                end
-                
-                if not is_group_owner then
-                    return false, "You can only teleport groups that you are a member of"
-                end
-            end
-
-            -- For individual players
-            if targets.type == "player" then
-                -- If not teleporting self, verify group membership
-                if targets.players[1] ~= "me" and targets.players[1] ~= name then
-                    local can_teleport = false
-                    -- Check if target is in any of the user's groups
-                    for group_name, members in pairs(groups) do
-                        local user_in_group = false
-                        local target_in_group = false
-                        
-                        for _, member in ipairs(members) do
-                            if member == name then
-                                user_in_group = true
-                            end
-                            if member == targets.players[1] then
-                                target_in_group = true
-                            end
-                        end
-                        
-                        if user_in_group and target_in_group then
-                            can_teleport = true
-                            break
-                        end
-                    end
-                    
-                    if not can_teleport then
-                        return false, "You can only teleport players who are in the same group as you"
-                    end
-                end
-            end
+        -- Validate target permissions
+        local targets = teleport_helpers.parse_targets(target_str, storage, minetest)
+        local valid, err = validate_target_permissions(name, targets, target_str)
+        if not valid then
+            return false, err
         end
-        
-        -- Get and validate destination
+
+        -- Validate location permissions using the command caller's permissions
+        local loc_valid, loc_err = validate_location_permissions(name, targets, loc_name)
+        if not loc_valid then
+            return false, loc_err
+        end
+
+        -- Get and validate destination using caller's permissions
         local dest_pos = get_location_pos(loc_name, name)
-          -- Regular users can only teleport to their own waypoints
-        if not is_admin then
-            local waypoints = integration.get_unified_inventory_waypoints(name)
-            -- Check if trying to teleport to home
-            if loc_name:lower() == "home" then
-                -- Check if target is self and has home privilege
-                if targets.type == "player" and (targets.players[1] == "me" or targets.players[1] == name) then
-                    if not minetest.check_player_privs(name, {home = true}) then
-                        return false, "You need the 'home' privilege to teleport to your home"
-                    end
-                else
-                    return false, "You cannot teleport others to your home location"
-                end
-            end
-            -- Check if destination is user's own waypoint
-            if not waypoints[loc_name] then
-                return false, "You can only teleport players to your own waypoints"
-            end
-        end
-        
         if not dest_pos then
-            return false, "Location '"..loc_name.."' does not exist"
+            -- Don't add quotes to the error message
+            return false, "Location "..loc_name.." does not exist"
         end
 
         -- Check if destination is safe
@@ -1073,7 +1167,7 @@ minetest.register_chatcommand("tprestore", {
         local is_admin = minetest.check_player_privs(name, {teleport_plus_admin = true})
 
         -- Parse and validate targets
-        local targets = parse_targets(param:trim())
+        local targets = teleport_helpers.parse_targets(param:trim(), storage, minetest)
         
         -- Get online players and track invalid/offline players
         local online_players, offline_players, invalid_players = get_online_players(targets, name)
@@ -1128,5 +1222,332 @@ minetest.register_chatcommand("tprestore", {
 
         log_action("Teleport Restore", name, string.format("Restored %s to previous locations", table.concat(restored, ", ")))
         return true, result_msg
+    end
+})
+
+-- SCHEDULE COMMANDS
+-- Register the /tpschedule command
+minetest.register_chatcommand("tpschedule", {
+    description = "Schedule teleportation of players",
+    params = "<targets> <location> <day1,day2> <HH:MM> [name=<namestring>] [repeat=on/off]",
+    privs = { teleport_plus_admin = true },
+    func = function(name, param)
+        -- First extract custom name parameter if it exists (can be quoted)
+        local name_param
+        param = param:gsub('name="([^"]+)"', function(p) name_param = p; return "" end)
+        param = param:gsub("name='([^']+)'", function(p) name_param = p; return "" end)
+        param = param:gsub('name=([^%s]+)', function(p) name_param = p; return "" end)
+        param = param:gsub("%s+", " "):trim()
+
+        -- Parse target - support for quoted names
+        local target_str, rest
+        if param:match('^".-"') or param:match("^'.-'") then
+            target_str = param:match('^"([^"]+)"') or param:match("^'([^']+')")
+            rest = param:sub(#target_str + 3):match("^%s*(.+)$")
+        else
+            target_str, rest = param:match("^(%S+)%s+(.+)$")
+        end
+
+        if not target_str or not rest then
+            return false, "Usage: /tpschedule <targets> <location> [day1,day2] <HH:MM> [name=<namestring>] [repeat=on/off]"
+        end        -- Robust parsing for location
+        local loc_name, remaining
+
+        -- Helper function to extract quoted or unquoted string and return remaining text
+        local function extract_quoted_or_unquoted(input)
+            input = input:trim()
+            local first_char = input:sub(1,1)
+            if first_char == '"' or first_char == "'" then
+                local pattern = "^" .. first_char .. "(.-)" .. first_char .. "%s*(.*)$"
+                local quoted, rem = input:match(pattern)
+                return quoted, rem
+            else
+                local unquoted, rem = input:match("^(%S+)%s*(.*)$")
+                return unquoted, rem
+            end
+        end
+
+        -- Extract location and remaining parameters correctly
+        loc_name, remaining = extract_quoted_or_unquoted(rest)
+
+        if not loc_name or not remaining then
+            return false, "Invalid location name or missing parameters"
+        end
+
+        -- Extract time and optional params
+        local time_str = remaining:match("(%d+:%d+)")
+        if not time_str then
+            return false, "Time format must be HH:MM in 24-hour format"
+        end
+
+        -- Extract days (text before the time)
+        local days_str = remaining:match("^(.-)%d+:%d+") or ""
+        days_str = days_str:gsub("^%s+", ""):gsub("%s+$", "")
+
+        -- Extract repeat parameter
+        local repeat_str = remaining:match("repeat=(%w+)")
+        local repeat_schedule = repeat_str and repeat_str:match("repeat=(%w+)") == "on"
+
+        -- Parse and validate targets first
+        local targets = teleport_helpers.parse_targets(target_str, storage, minetest)
+        local targets_valid, targets_err = schedule_module.validate_targets(name, target_str)
+        if not targets_valid then
+            return false, targets_err
+        end
+        
+        -- Validate location
+        local loc_valid, loc_err = schedule_module.validate_location(name, loc_name)
+        if not loc_valid then
+            return false, loc_err
+        end
+
+        -- Check if destination is safe
+        local dest_pos = get_location_pos(loc_name, name)
+        local safe_pos, safety_msg = integration.is_safe_position(dest_pos)
+        if not safe_pos then
+            return false, "Destination is not safe: "..safety_msg
+        end        -- Parse and validate time
+        local minutes = schedule_module.time_to_minutes(time_str)
+        if not minutes then
+            return false, "Invalid time format. Use HH:MM in 24-hour format (00:00 - 23:59)"
+        end
+        
+        -- Parse and validate days
+        local days = schedule_module.parse_days(days_str)
+        if not days then
+            return false, "Invalid days. Use day names separated by commas (e.g., mon,wed,fri)"
+        end
+          -- Generate or use provided schedule name
+        local schedule_name
+        if name_param then            -- Validate custom name doesn't already exist
+            if schedule_module.schedules[name_param] then
+                return false, "A schedule with the name '"..name_param.."' already exists"
+            end
+            schedule_name = name_param
+        else
+            schedule_name = schedule_module.get_next_schedule_name()
+        end        -- Create or update schedule
+        schedule_module.schedules[schedule_name] = {
+            target = strip_quotes(target_str):trim(),  -- Always store target without quotes
+            target_type = targets.type,
+            location = strip_quotes(loc_name):trim(),  -- Always store location without quotes (CRITICAL)
+            time = minutes,
+            days = days,
+            repeat_schedule = repeat_schedule,
+            created_by = name,
+            created_at = os.time(),
+            last_run = nil
+        }
+        
+        -- Properly persist immediately
+        schedule_module.save_schedules()
+          -- Create success message
+        local days_description
+        -- Always check the actual days array since it might be all days even with a days_str
+        local days_sorted = {}
+        for _, day in ipairs(days) do
+            table.insert(days_sorted, day)
+        end
+        table.sort(days_sorted)
+        local sorted_days = table.concat(days_sorted)
+        
+        if sorted_days == "12345" then
+            days_description = "weekdays"
+        elseif sorted_days == "67" then
+            days_description = "weekends"
+        elseif sorted_days == "1234567" then
+            days_description = "all days"
+        else
+            -- If days were specified, use the original days_str
+            days_description = days_str ~= "" and days_str or "all days"
+        end        local repeat_text = repeat_schedule and "repeating" or "one-time"
+        -- Format time string to ensure 24-hour format
+        local formatted_time = string.format("%02d:%02d", 
+            math.floor(minutes / 60),
+            minutes % 60)
+        return true, string.format(
+            "Created %s schedule '%s' to teleport %s to %s at %s on %s",
+            repeat_text,
+            schedule_name,
+            target_str,
+            loc_name,
+            formatted_time,
+            days_description
+        )
+    end
+})
+
+-- Register the /delschedule command
+minetest.register_chatcommand("delschedule", {
+    description = "Delete a teleport schedule",
+    params = "<name>",
+    privs = { teleport_plus_admin = true },
+    func = function(name, param)
+        local schedules = schedule_module.reload()
+        local schedule_name = param:match("^%s*(.-)%s*$")
+        if not schedule_name or schedule_name == "" then
+            return false, "Usage: /delschedule <name>"
+        end
+        if not schedules[schedule_name] then
+            return false, "Schedule '"..schedule_name.."' does not exist"
+        end
+        schedules[schedule_name] = nil
+        schedule_module.save_schedules()
+        return true, "Deleted schedule '"..schedule_name.."'"
+    end
+})
+
+-- Register the /listschedules command
+minetest.register_chatcommand("listschedules", {
+    description = "List all teleport schedules",
+    privs = { teleport_plus_admin = true },    
+    func = function(name, param)        
+        if not next(schedule_module.schedules) then
+            return false, "No schedules exist"
+        end
+          
+        local schedule_list = {}
+        for schedule_name, schedule in pairs(schedule_module.schedules) do
+            -- Format time string ensuring 24-hour format
+            local hours = math.floor(schedule.time / 60)
+            local minutes = schedule.time % 60
+            local time_str = string.format("%02d:%02d", hours, minutes)
+            
+            -- Get day names for display
+            local day_names = {
+                [1] = "Monday", [2] = "Tuesday", [3] = "Wednesday",
+                [4] = "Thursday", [5] = "Friday", [6] = "Saturday", [7] = "Sunday"
+            }
+            
+            -- Sort days for pattern detection
+            local days_sorted = {}
+            for _, day in ipairs(schedule.days) do
+                table.insert(days_sorted, day)
+            end
+            table.sort(days_sorted)
+            local sorted_days = table.concat(days_sorted)
+            
+            -- Format days string based on patterns
+            local days_str
+            if #days_sorted == 7 then
+                days_str = "every day"
+            elseif sorted_days == "12345" then
+                days_str = "weekdays"
+            elseif sorted_days == "67" then
+                days_str = "weekends"
+            else
+                -- List specific days
+                local days = {}
+                for _, day in ipairs(schedule.days) do
+                    table.insert(days, day_names[day])
+                end
+                days_str = table.concat(days, ", ")
+            end
+            
+            -- Format schedule entry
+            table.insert(schedule_list, string.format(
+                "%s: %s → %s at %s on %s (%s)",
+                schedule_name,
+                schedule.target,
+                schedule.location,
+                time_str,
+                days_str,
+                schedule.repeat_schedule and "repeating" or "one-time"
+            ))
+        end
+        
+        table.sort(schedule_list)
+        return true, "Schedules:\n" .. table.concat(schedule_list, "\n")
+    end
+})
+
+-- Register the /servertime command
+minetest.register_chatcommand("servertime", {
+    description = "Show current server time and day",
+    func = function(name, param)
+        local current_time = os.time()
+        local time_table = os.date("*t", current_time)
+        
+        -- Convert wday (1=Sunday) to our format (1=Monday)
+        local current_wday = time_table.wday == 1 and 7 or time_table.wday - 1
+        
+        -- Get day name
+        local day_names = {
+            [1] = "Monday",
+            [2] = "Tuesday",
+            [3] = "Wednesday",
+            [4] = "Thursday",
+            [5] = "Friday",
+            [6] = "Saturday",
+            [7] = "Sunday"
+        }
+        
+        local day_name = day_names[current_wday]
+        local time_str = string.format("%02d:%02d", time_table.hour, time_table.min)
+        
+        return true, string.format("Current server time: %s (%s)", time_str, day_name)
+    end
+})
+
+-- Register the /schedules command (alias for /listschedules)
+minetest.register_chatcommand("schedules", {
+    description = "List all teleport schedules",
+    privs = { teleport_plus_admin = true },
+    func = function(name, param)
+        local schedules = schedule_module.reload()
+        if not next(schedules) then
+            return false, "No schedules exist"
+        end
+        
+        local schedule_list = {}
+        for schedule_name, schedule in pairs(schedules) do
+            local hours = math.floor(schedule.time / 60)
+            local minutes = schedule.time % 60
+            local time_str = string.format("%02d:%02d", hours, minutes)
+            
+            -- Get day names for display
+            local day_names = {
+                [1] = "Monday", [2] = "Tuesday", [3] = "Wednesday",
+                [4] = "Thursday", [5] = "Friday", [6] = "Saturday", [7] = "Sunday"
+            }
+            
+            -- Sort days for pattern detection
+            local days_sorted = {}
+            for _, day in ipairs(schedule.days) do
+                table.insert(days_sorted, day)
+            end
+            table.sort(days_sorted)
+            local sorted_days = table.concat(days_sorted)
+            
+            -- Format days string based on patterns
+            local days_str
+            if #days_sorted == 7 then
+                days_str = "every day"
+            elseif sorted_days == "12345" then
+                days_str = "weekdays"
+            elseif sorted_days == "67" then
+                days_str = "weekends"
+            else
+                -- List specific days
+                local days = {}
+                for _, day in ipairs(schedule.days) do
+                    table.insert(days, day_names[day])
+                end
+                days_str = table.concat(days, ", ")
+            end
+            
+            table.insert(schedule_list, string.format(
+                "%s: %s → %s at %s on %s (%s)",
+                schedule_name,
+                schedule.target,
+                schedule.location,
+                time_str,
+                days_str,
+                schedule.repeat_schedule and "repeating" or "one-time"
+            ))
+        end
+        
+        table.sort(schedule_list)
+        return true, "Schedules:\n" .. table.concat(schedule_list, "\n")
     end
 })

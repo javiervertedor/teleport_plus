@@ -16,6 +16,7 @@ minetest.register_privilege("teleport_plus_admin", {
 
 -- Load core modules with proper returns
 local integration = dofile(modpath .. "/mods_integration.lua")
+local schedules = dofile(modpath .. "/schedules.lua")
 dofile(modpath .. "/commands.lua")
 
 -- Register protection callbacks after integration module is loaded

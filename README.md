@@ -41,10 +41,26 @@ This mod provides immersive, teacher-friendly teleportation features. It allows 
 | `/group <group>`                               | Lists users in a group                          |
 | `/givegroup <group> <item> [quantity]`         | Give items to all online users in a group (max 99) |
 | `/groupmsg <group> <message>`                  | Send a private message to all online users in a group |
-| `/schedule_tp <targets> <location> <day1,day2> <HH:MM> [name=<namestring>] [repeat=on/off]` | Schedule users or group teleport              |
+| `/tpschedule <targets> <location> [day1,day2] <HH:MM> [name=<namestring>] [repeat=on/off]` | Schedule users or group teleport. Time must be in 24-hour format (00:00-23:59) |
+| `/schedules`                         | Show current schedules                        |
 | `/delschedule <name>`                         | Deletes a teleport schedule                        |
+| `/servertime`                        | Show current server time and day              |
 
 Note: `<targets>` can be `me`, `all`, groups `Team1` or `name1,name2`
+
+## Additional Notes
+
+### Group Management
+- When creating or modifying groups, the system validates that all players exist in the game's database
+- If any player in a group doesn't exist, the operation will fail with a list of invalid players
+- Groups cannot be used in commands if they contain invalid players
+
+### Schedule Management
+- Schedule names are automatically assigned (Schedule01, Schedule02, etc.) if not specified
+- When schedules are deleted, their numbers become available for reuse
+- Schedule numbers are kept as low as possible (fills gaps before creating new numbers)
+- Custom schedule names can be specified using the `name=` parameter
+- Time must be in 24-hour format (00:00-23:59)
 
 ## License
 
