@@ -1,3 +1,7 @@
+-- Areas mod global declaration
+---@type table|nil
+areas = areas or nil
+
 local integration = {}
 local storage = minetest.get_mod_storage()
 

@@ -315,9 +315,8 @@ local function update_location_hud(player_name)
     
     -- Add HUD for each location with HUD enabled
     for loc_name, loc_data in pairs(locations) do
-        if loc_data.show_hud then
-            local hud_id = player:hud_add({
-                hud_elem_type = "waypoint",
+        if loc_data.show_hud then            local hud_id = player:hud_add({
+                type = "waypoint",
                 name = loc_name,
                 text = "m",
                 number = 0xFFFFFF,
