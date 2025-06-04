@@ -46,14 +46,15 @@ end
 local teleport_history = {}
 
 -- Shared teleport functions
-local function validate_target_permissions(name, targets, target_str)    local is_admin = minetest.check_player_privs(name, {teleport_plus_admin = true})
+local function validate_target_permissions(name, targets, target_str)
+    local is_admin = minetest.check_player_privs(name, {teleport_plus_admin = true})
     
     -- Admins can teleport anyone
     if is_admin then
         return true
     end
     
-    -- Get the user's groups
+    -- Get the user's groups for permission checking
     local groups = minetest.deserialize(storage:get_string("teleport_groups")) or {}
     local user_groups = {}
     for group_name, members in pairs(groups) do
@@ -66,7 +67,7 @@ local function validate_target_permissions(name, targets, target_str)    local i
     end
     
     if targets.type == "player" then
-        -- Allow 'me' or their own name
+        -- Always allow a player to teleport themselves via 'me' or their own name
         if targets.players[1] == "me" or targets.players[1] == name then
             return true
         end
@@ -146,29 +147,34 @@ end
 
 local function validate_group_exists(target_str, groups)
     -- Strip quotes from group name
-    local group_name = strip_quotes(target_str:trim())
+    local group_name = teleport_helpers.strip_quotes(target_str:trim())
     
     if not groups[group_name] then
-        return false, "Group '"..group_name.."' does not exist"
+        return false, string.format("Group '%s' does not exist", group_name)
     end
 
     -- Validate all players in the group exist
     local invalid_players = {}
+    local whitelist = integration.has_whitelist() and integration.get_whitelist()
+    
     for _, player_name in ipairs(groups[group_name]) do
-        if not minetest.player_exists(player_name) then
+        -- Check if the player exists
+        if not minetest.get_auth_handler().get_auth(player_name) then
+            table.insert(invalid_players, player_name)
+        -- If whitelist is enabled, check if player is whitelisted or an admin
+        elseif whitelist and not (whitelist[player_name] or minetest.check_player_privs(player_name, {teleport_plus_admin = true})) then
             table.insert(invalid_players, player_name)
         end
     end
 
     if #invalid_players > 0 then
         return false, string.format(
-            "The following players in group '%s' do not exist: %s",
+            "The following players in group '%s' do not exist or are not whitelisted: %s",
             group_name,
             table.concat(invalid_players, ", ")
         )
     end
 
-    -- Group exists and all players are valid
     return true
 end
 
@@ -258,12 +264,17 @@ local function get_online_players(targets, caller_name)
 
     -- Get whitelist if available
     local whitelist = integration.has_whitelist() and integration.get_whitelist()
+    local is_admin = minetest.check_player_privs(caller_name, {teleport_plus_admin = true})
 
     -- Handle special cases
     if targets.type == "all" then
-        for name, _ in pairs(all_online) do
-            if not whitelist or whitelist[name] then
-                table.insert(online, name)
+        if not is_admin then
+            return online, offline, invalid
+        end
+        for player_name, _ in pairs(all_online) do
+            -- Admins can teleport non-whitelisted players
+            if is_admin or not whitelist or whitelist[player_name] then
+                table.insert(online, player_name)
             end
         end
         return online, offline, invalid
@@ -272,7 +283,16 @@ local function get_online_players(targets, caller_name)
     local target_players = {}
     if targets.type == "player" then
         if targets.players[1] == "me" then
+            -- Always use caller_name for "me" target
             target_players = {caller_name}
+            -- Admins and whitelisted players can always teleport themselves
+            if is_admin or not whitelist or whitelist[caller_name] then
+                if all_online[caller_name] then
+                    return {caller_name}, {}, {}
+                else 
+                    return {}, {caller_name}, {}
+                end
+            end
         else
             target_players = targets.players
         end
@@ -280,18 +300,22 @@ local function get_online_players(targets, caller_name)
         target_players = targets.players
     end
 
-    for _, name in ipairs(target_players) do
-        if not minetest.get_auth_handler().get_auth(name) then
-            table.insert(invalid, name)
-        elseif whitelist and not whitelist[name] then
-            table.insert(invalid, name)
-        elseif all_online[name] then
-            table.insert(online, name)
+    -- Process each target player
+    for _, player_name in ipairs(target_players) do
+        if not minetest.get_auth_handler().get_auth(player_name) then
+            table.insert(invalid, player_name)
+        elseif all_online[player_name] then
+            -- If player is online, add them if they're whitelisted, an admin, or being teleported by an admin
+            if is_admin or not whitelist or whitelist[player_name] or minetest.check_player_privs(player_name, {teleport_plus_admin = true}) then
+                table.insert(online, player_name)
+            else
+                table.insert(invalid, player_name)
+            end
         else
-            table.insert(offline, name)
+            table.insert(offline, player_name)
         end
     end
-    
+
     return online, offline, invalid
 end
 
