@@ -19,6 +19,15 @@ local integration = dofile(modpath .. "/mods_integration.lua")
 local schedules = dofile(modpath .. "/schedules.lua")
 dofile(modpath .. "/commands.lua")
 
+-- Ensure Areas mod is properly loaded with a delay
+minetest.after(1, function()
+    if integration.has_areas() then
+        minetest.log("action", "[teleport_plus] Areas mod integration confirmed")
+    else
+        minetest.log("warning", "[teleport_plus] Areas mod integration not available - protection will use fallback system")
+    end
+end)
+
 -- Register protection callbacks after integration module is loaded
 if integration then
     -- Primary protection check
@@ -59,5 +68,61 @@ if integration then
         end
     end)
 end
+
+-- Override Unified Inventory's home command to respect tp=on/off restrictions
+minetest.after(0, function()
+    if integration.has_unified_inventory() then
+        -- Override the /home command to include our teleportation restrictions
+        minetest.override_chatcommand("home", {
+            description = "Go to your home (respects teleport area restrictions)",
+            privs = { home = true },
+            func = function(name, param)                -- Check teleportation permissions first
+                local can_teleport, tp_err = integration.check_home_teleport_permissions(name)
+                if not can_teleport then
+                    return false, tp_err
+                end
+                
+                -- Get home position
+                local pos = integration.get_home_position(name)
+                if not pos then
+                    return false, "Set a home using /sethome"
+                end
+                
+                -- Get player and teleport (simplified - no safety checks)
+                local player = minetest.get_player_by_name(name)
+                if not player then
+                    return false, "Player not found"
+                end
+                
+                -- Just teleport directly - let the game engine handle any adjustments
+                player:set_pos(pos)
+                return true, "Teleported to home"
+            end
+        })
+        
+        -- Also override /sethome if it exists
+        if minetest.registered_chatcommands["sethome"] then
+            minetest.override_chatcommand("sethome", {
+                description = "Set your home position",
+                privs = { home = true },
+                func = function(name, param)
+                    local player = minetest.get_player_by_name(name)
+                    if not player then
+                        return false, "Player not found"
+                    end
+                    
+                    local pos = player:get_pos()
+                    local success = integration.set_home_position(name, pos)
+                    if success then
+                        return true, string.format("Home set at %d,%d,%d", 
+                            math.floor(pos.x), math.floor(pos.y), math.floor(pos.z))
+                    else
+                        return false, "Failed to set home position"
+                    end
+                end
+            })
+        end
+    end
+end)
 
 minetest.log("action", "[teleport_plus] Loaded successfully with Unified Inventory integration.")

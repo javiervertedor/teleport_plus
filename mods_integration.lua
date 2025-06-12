@@ -9,16 +9,25 @@ local storage = minetest.get_mod_storage()
 function integration.has_areas()
     local has_modpath = minetest.get_modpath("areas") ~= nil
     local areas_exists = areas ~= nil
-    local areas_func_exists = areas_exists and type(areas.add) == "function"
+    local areas_func_exists = areas_exists and type(areas.add) == "function" and type(areas.remove) == "function" and type(areas.save) == "function"
     
     if not has_modpath then
         minetest.log("warning", "[teleport_plus] Areas mod files not found")
         return false
     end
-    if not areas_exists or not areas_func_exists then
-        minetest.log("warning", "[teleport_plus] Areas mod not properly initialized")
+    if not areas_exists then
+        minetest.log("warning", "[teleport_plus] Areas global table not available")
         return false
     end
+    if not areas_func_exists then
+        minetest.log("warning", "[teleport_plus] Areas mod API functions not available (add:" .. 
+            tostring(areas and type(areas.add)) .. ", remove:" .. 
+            tostring(areas and type(areas.remove)) .. ", save:" .. 
+            tostring(areas and type(areas.save)) .. ")")
+        return false
+    end
+    
+    minetest.log("action", "[teleport_plus] Areas mod is available and properly initialized")
     return true
 end
 
@@ -95,22 +104,46 @@ function integration.is_valid_position(pos)
     return true
 end
 
--- Check if position is safe for teleportation
+-- Check if position is safe for teleportation (basic safety only)
 function integration.is_safe_position(pos)
-    -- Check if position is in solid block
-    local node = minetest.get_node(pos)
-    if node.name ~= "air" then
+    -- Check if player feet position is safe (not in solid block or lava)
+    local feet_node = minetest.get_node(pos)
+    local feet_def = minetest.registered_nodes[feet_node.name]
+    
+    -- Don't teleport into lava or other dangerous liquids
+    if feet_def and (feet_def.damage_per_second or 0) > 0 then
+        return false, "Position is in dangerous liquid"
+    end
+    
+    -- Don't teleport into solid blocks (but allow air and walkable=false nodes)
+    if feet_def and feet_def.walkable and feet_def.walkable ~= false then
         return false, "Position is inside a solid block"
     end
     
-    -- Check if position has solid ground below
-    local ground_pos = {x = pos.x, y = pos.y - 1, z = pos.z}
-    local ground = minetest.get_node(ground_pos)
-    if ground.name == "air" or ground.name == "ignore" then
-        return false, "Position has no solid ground below"
+    -- Check if there's ground below (within reasonable distance)
+    for y_check = 1, 10 do
+        local ground_pos = {x = pos.x, y = pos.y - y_check, z = pos.z}
+        local ground_node = minetest.get_node(ground_pos)
+        local ground_def = minetest.registered_nodes[ground_node.name]
+        
+        if ground_def and ground_def.walkable then
+            return true -- Found solid ground within 10 blocks
+        end
     end
     
-    return true
+    return false, "No solid ground found below position"
+end
+
+-- Simple function to adjust position if needed (minimal adjustment)
+function integration.find_safe_position_near(target_pos, search_radius)
+    -- Just try the target position first
+    if integration.is_safe_position(target_pos) then
+        return target_pos
+    end
+    
+    -- If not safe, just return the original position anyway
+    -- Let the game engine handle minor adjustments
+    return target_pos
 end
 
 -- Check if Unified Inventory mod is available
@@ -205,6 +238,7 @@ end
 -- Protect a location using Areas mod
 function integration.protect_location(loc_name, pos, radius, owner)
     if not integration.has_areas() then
+        minetest.log("warning", "[teleport_plus] Areas mod not available for protection")
         return false
     end
 
@@ -218,12 +252,20 @@ function integration.protect_location(loc_name, pos, radius, owner)
         x = math.floor(pos.x + radius),
         y = math.floor(pos.y + radius),
         z = math.floor(pos.z + radius)
-    }    -- Add the area protection
+    }
+    
+    minetest.log("action", string.format("[teleport_plus] Creating area '%s' for owner '%s' from %s to %s", 
+        loc_name, owner, minetest.pos_to_string(pos1), minetest.pos_to_string(pos2)))
+    
+    -- Add the area protection
     local area_id = areas:add(owner, loc_name, pos1, pos2, nil)  -- nil = no parent area
 
     if area_id then
         areas:save()
+        minetest.log("action", "[teleport_plus] Successfully created area " .. area_id .. " for location " .. loc_name)
         return true, area_id
+    else
+        minetest.log("error", "[teleport_plus] Failed to create area for location " .. loc_name)
     end
 
     return false
@@ -241,14 +283,20 @@ function integration.remove_location_protection(area_id, owner)
         return false
     end
 
-    -- Remove the area directly using the Areas API
-    areas:remove(area_id)
-    
-    -- Save changes
-    areas:save()
-    
-    minetest.log("action", "[teleport_plus] Successfully removed area " .. area_id)
-    return true
+    -- Check if the area exists before trying to remove it
+    if areas.areas and areas.areas[area_id] then
+        -- Remove the area directly using the Areas API
+        areas:remove(area_id)
+        
+        -- Save changes
+        areas:save()
+        
+        minetest.log("action", "[teleport_plus] Successfully removed area " .. area_id)
+        return true
+    else
+        minetest.log("warning", "[teleport_plus] Area " .. area_id .. " does not exist, may have been already removed")
+        return true  -- Consider it successful since the area doesn't exist
+    end
 end
 
 -- Check if a position is protected by teleport locations
@@ -280,6 +328,50 @@ function integration.protect_node(pos, name)
     end
     
     return false
+end
+
+-- Check teleportation permissions for home teleports
+function integration.check_home_teleport_permissions(player_name)
+    local is_admin = minetest.check_player_privs(player_name, {server = true}) or 
+                     minetest.check_player_privs(player_name, {teleport_plus_admin = true})
+    
+    -- Admins can always teleport
+    if is_admin then
+        return true
+    end
+    
+    local player = minetest.get_player_by_name(player_name)
+    if not player then
+        return false, "Player not found"
+    end
+    
+    local player_pos = player:get_pos()
+    local locations = minetest.deserialize(storage:get_string("teleport_locations")) or {}
+    
+    -- Check if player is in any location area with teleportation disabled
+    for loc_name, location_data in pairs(locations) do
+        if location_data.pos and location_data.radius then
+            local loc_pos = location_data.pos
+            local radius = location_data.radius or 5
+            
+            -- Check if player is within the location area
+            if player_pos.x >= (loc_pos.x - radius) and player_pos.x <= (loc_pos.x + radius) and
+               player_pos.y >= (loc_pos.y - radius) and player_pos.y <= (loc_pos.y + radius) and
+               player_pos.z >= (loc_pos.z - radius) and player_pos.z <= (loc_pos.z + radius) then
+                -- Check if teleportation is disabled for this location (default to enabled for backward compatibility)
+                local tp_enabled = location_data.tp_enabled
+                if tp_enabled == nil then
+                    tp_enabled = true  -- Default for backward compatibility
+                end
+                
+                if not tp_enabled then
+                    return false, string.format("Teleportation is disabled in location '%s'", loc_name)
+                end
+            end
+        end
+    end
+    
+    return true
 end
 
 -- Add after the protect_node function but before return integration
